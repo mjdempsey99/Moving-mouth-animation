@@ -51,14 +51,12 @@
     const status = document.getElementById('status');
 
     // Mouth configuration
-    const mouthWidth = 100;
+    const mouthWidth = 120;
     let mouthTopY = 250;
     let mouthCenterX = 200;
-    const mouthHeightBase = 5;
 
     // Animation state
-    let leftMouthDrop = 0;
-    let rightMouthDrop = 0;
+    let mouthOpen = 0; // 0 = closed, positive = open
     let faceImage = null;
     let placingMouth = false;
 
@@ -97,6 +95,64 @@
     });
 
     /* ---------------- Drawing ---------------- */
+    function drawCartoonMouth() {
+      const open = mouthOpen;
+      const halfWidth = mouthWidth / 2;
+
+      // Mouth cavity (black)
+      ctx.beginPath();
+      ctx.ellipse(
+        mouthCenterX,
+        mouthTopY + open / 2,
+        halfWidth,
+        Math.max(2, open / 2),
+        0,
+        0,
+        Math.PI * 2
+      );
+      ctx.fillStyle = '#000';
+      ctx.fill();
+
+      // Teeth (only visible when open)
+      if (open > 6) {
+        ctx.beginPath();
+        ctx.rect(
+          mouthCenterX - halfWidth + 8,
+          mouthTopY + 2,
+          mouthWidth - 16,
+          open / 3
+        );
+        ctx.fillStyle = '#fff';
+        ctx.fill();
+      }
+
+      // Upper lip
+      ctx.beginPath();
+      ctx.moveTo(mouthCenterX - halfWidth, mouthTopY);
+      ctx.quadraticCurveTo(
+        mouthCenterX,
+        mouthTopY - 12,
+        mouthCenterX + halfWidth,
+        mouthTopY
+      );
+      ctx.strokeStyle = '#b22222';
+      ctx.lineWidth = 6;
+      ctx.stroke();
+
+      // Lower lip
+      ctx.beginPath();
+      ctx.moveTo(mouthCenterX - halfWidth, mouthTopY + open);
+      ctx.quadraticCurveTo(
+        mouthCenterX,
+        mouthTopY + open + 14,
+        mouthCenterX + halfWidth,
+        mouthTopY + open
+      );
+      ctx.strokeStyle = '#b22222';
+      ctx.lineWidth = 6;
+      ctx.stroke();
+    }
+
     function drawFace() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -109,31 +165,11 @@
         ctx.fill();
       }
 
-      // Upper lip
-      ctx.beginPath();
-      ctx.moveTo(mouthCenterX - mouthWidth / 2, mouthTopY);
-      ctx.lineTo(mouthCenterX + mouthWidth / 2, mouthTopY);
-      ctx.strokeStyle = '#000';
-      ctx.lineWidth = 4;
-      ctx.stroke();
-
-      // Lower lip
-      ctx.beginPath();
-      ctx.moveTo(mouthCenterX - mouthWidth / 2, mouthTopY);
-      ctx.lineTo(
-        mouthCenterX,
-        mouthTopY + mouthHeightBase + Math.max(leftMouthDrop, rightMouthDrop)
-      );
-      ctx.lineTo(mouthCenterX + mouthWidth / 2, mouthTopY);
-      ctx.strokeStyle = '#a00';
-      ctx.lineWidth = 4;
-      ctx.stroke();
+      drawCartoonMouth();
     }
 
     function updateMouth(volume) {
-      const drop = Math.min(60, volume * 800);
-      leftMouthDrop = drop;
-      rightMouthDrop = drop;
+      mouthOpen = Math.min(70, volume * 900);
     }
 
     /* ---------------- Audio ---------------- */
@@ -141,7 +177,6 @@
       warning.textContent = '';
       status.textContent = '';
 
-      // Hard fail early for file:// (VERY common cause of NotAllowedError)
       if (location.protocol === 'file:') {
         warning.textContent = 'Microphone access is blocked for file:// URLs. Please use localhost or HTTPS.';
         return;
@@ -153,7 +188,6 @@
       }
 
       try {
-        // IMPORTANT: do NOT pre-query permissions (Safari + Chrome bug source)
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -196,10 +230,11 @@
 
     startMicBtn.addEventListener('click', startMic);
 
-    /* ---------------- Runtime checks ---------------- */
+    /* ---------------- Runtime checks / tests ---------------- */
     console.assert(navigator.mediaDevices && navigator.mediaDevices.getUserMedia, 'getUserMedia not supported');
     console.assert(typeof startMic === 'function', 'startMic missing');
     console.assert(typeof drawFace === 'function', 'drawFace missing');
+    console.assert(typeof drawCartoonMouth === 'function', 'drawCartoonMouth missing');
 
     drawFace();
   </script>
