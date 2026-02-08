@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Talking Face</title>
+  <style>
+    body {
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      background: #eef;
+      font-family: Arial, sans-serif;
+    }
+    canvas {
+      border: 1px solid #333;
+      background: #fff;
+    }
+    input, button {
+      margin-top: 0.75em;
+    }
+    .warning {
+      margin-top: 0.75em;
+      color: #a00;
+      max-width: 380px;
+      text-align: center;
+      font-size: 0.9em;
+    }
+    .status {
+      margin-top: 0.5em;
+      color: #060;
+      font-size: 0.85em;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="faceCanvas" width="400" height="400"></canvas>
+  <input type="file" id="imageUpload" accept="image/*">
+  <button id="startMicBtn">Enable Microphone</button>
+  <div class="warning" id="warning"></div>
+  <div class="status" id="status"></div>
+
+  <script>
+    const canvas = document.getElementById('faceCanvas');
+    const ctx = canvas.getContext('2d');
+    const imageUpload = document.getElementById('imageUpload');
+    const startMicBtn = document.getElementById('startMicBtn');
+    const warning = document.getElementById('warning');
+    const status = document.getElementById('status');
+
+    // Mouth configuration
+    const mouthWidth = 100;
+    let mouthTopY = 250;
+    let mouthCenterX = 200;
+    const mouthHeightBase = 5;
+
+    // Animation state
+    let leftMouthDrop = 0;
+    let rightMouthDrop = 0;
+    let faceImage = null;
+    let placingMouth = false;
+
+    // Audio state
+    let audioContext = null;
+    let analyser = null;
+    let audioActive = false;
+
+    /* ---------------- Image handling ---------------- */
+    imageUpload.addEventListener('change', (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          faceImage = img;
+          placingMouth = true;
+          warning.textContent = 'Click on the image where the mouth should be positioned.';
+          drawFace();
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+
+    canvas.addEventListener('click', (e) => {
+      if (!placingMouth) return;
+      const rect = canvas.getBoundingClientRect();
+      mouthCenterX = e.clientX - rect.left;
+      mouthTopY = e.clientY - rect.top;
+      placingMouth = false;
+      warning.textContent = '';
+      drawFace();
+    });
+
+    /* ---------------- Drawing ---------------- */
+    function drawFace() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      if (faceImage) {
+        ctx.drawImage(faceImage, 0, 0, canvas.width, canvas.height);
+      } else {
+        ctx.beginPath();
+        ctx.arc(200, 200, 150, 0, Math.PI * 2);
+        ctx.fillStyle = '#FFDAB9';
+        ctx.fill();
+      }
+
+      // Upper lip
+      ctx.beginPath();
+      ctx.moveTo(mouthCenterX - mouthWidth / 2, mouthTopY);
+      ctx.lineTo(mouthCenterX + mouthWidth / 2, mouthTopY);
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 4;
+      ctx.stroke();
+
+      // Lower lip
+      ctx.beginPath();
+      ctx.moveTo(mouthCenterX - mouthWidth / 2, mouthTopY);
+      ctx.lineTo(
+        mouthCenterX,
+        mouthTopY + mouthHeightBase + Math.max(leftMouthDrop, rightMouthDrop)
+      );
+      ctx.lineTo(mouthCenterX + mouthWidth / 2, mouthTopY);
+      ctx.strokeStyle = '#a00';
+      ctx.lineWidth = 4;
+      ctx.stroke();
+    }
+
+    function updateMouth(volume) {
+      const drop = Math.min(60, volume * 800);
+      leftMouthDrop = drop;
+      rightMouthDrop = drop;
+    }
+
+    /* ---------------- Audio ---------------- */
+    async function startMic() {
+      warning.textContent = '';
+      status.textContent = '';
+
+      // Hard fail early for file:// (VERY common cause of NotAllowedError)
+      if (location.protocol === 'file:') {
+        warning.textContent = 'Microphone access is blocked for file:// URLs. Please use localhost or HTTPS.';
+        return;
+      }
+
+      if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+        warning.textContent = 'Microphone access requires HTTPS or localhost.';
+        return;
+      }
+
+      try {
+        // IMPORTANT: do NOT pre-query permissions (Safari + Chrome bug source)
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        await audioContext.resume();
+
+        const source = audioContext.createMediaStreamSource(stream);
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+
+        audioActive = true;
+        status.textContent = 'Microphone active — speak to animate the mouth.';
+
+        const bufferLength = analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+
+        function animate() {
+          if (!audioActive) return;
+
+          analyser.getByteTimeDomainData(dataArray);
+
+          let sumSquares = 0;
+          for (let i = 0; i < bufferLength; i++) {
+            const normalized = (dataArray[i] - 128) / 128;
+            sumSquares += normalized * normalized;
+          }
+
+          const rms = Math.sqrt(sumSquares / bufferLength);
+          updateMouth(rms);
+          drawFace();
+          requestAnimationFrame(animate);
+        }
+
+        animate();
+      } catch (err) {
+        warning.textContent = 'Microphone permission denied by browser. Check site settings and reload.';
+        console.error(err);
+      }
+    }
+
+    startMicBtn.addEventListener('click', startMic);
+
+    /* ---------------- Runtime checks ---------------- */
+    console.assert(navigator.mediaDevices && navigator.mediaDevices.getUserMedia, 'getUserMedia not supported');
+    console.assert(typeof startMic === 'function', 'startMic missing');
+    console.assert(typeof drawFace === 'function', 'drawFace missing');
+
+    drawFace();
+  </script>
+</body>
+</html>
